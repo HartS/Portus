@@ -2,6 +2,10 @@ require "rails_helper"
 
 describe "/v2/token" do
   describe "get token" do
+    before do
+      Devise.http_authentication_realm = host
+    end
+
     def parse_token(body)
       token = JSON.parse(body)["token"]
       JWT.decode(token, nil, false, leeway: 2)[0]
@@ -36,12 +40,24 @@ describe "/v2/token" do
         create(:namespace, name: "foo_namespace", registry: registry)
       end
 
-      it "denies access when the password is wrong" do
+      it "denies access and provides authenticate header when the password is wrong" do
         get v2_token_url,
           valid_request,
           invalid_auth_header
-
         expect(response.status).to eq 401
+
+        auth_header = response.headers['www-authenticate']
+        expect(auth_header).to match /basic realm=.*/i
+        # Get auth_realm from response and strip wrapping quotes, if present:
+        auth_realm = auth_header.scan(/basic realm=(.*)/i).first.last.gsub(/"(.*)"/, '\1')
+        auth_realm_url = URI.parse(v2_token_url)
+        auth_realm_url.hostname = auth_realm
+        auth_realm_url = auth_realm_url.to_s
+
+        get auth_realm_url,
+          valid_request,
+          valid_auth_header
+        expect(response.status).to eq 200
       end
 
       it "denies access when the user does not exist" do
